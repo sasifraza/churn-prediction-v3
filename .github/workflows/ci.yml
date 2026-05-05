@@ -1,0 +1,54 @@
+name: Deploy Churn Prediction V3
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1 - Download code onto VM
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Step 2 - Login to Azure
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # Step 3 - Login to ACR
+      - name: Login to ACR
+        run: |
+          docker login churnv3acr.azurecr.io \
+            --username ${{ secrets.ACR_USERNAME }} \
+            --password ${{ secrets.ACR_PASSWORD }}
+
+      # Step 4 - Build and push image
+      - name: Build and push image
+        run: |
+          docker build -t churnv3acr.azurecr.io/churn-api:latest .
+          docker push churnv3acr.azurecr.io/churn-api:latest
+
+      # Step 5 - Deploy to Container Apps
+      - name: Deploy to Container Apps
+        run: |
+          az containerapp update \
+            --name churn-v3-app \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --image churnv3acr.azurecr.io/churn-api:latest \
+            --min-replicas 1
+
+      # Step 6 - Route traffic to latest revision
+      - name: Set traffic to latest revision
+        run: |
+          az containerapp revision set-mode \
+            --name churn-v3-app \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --mode multiple
+          az containerapp ingress traffic set \
+            --name churn-v3-app \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --revision-weight latest=100
